@@ -44,15 +44,9 @@ proc broadcaster() {.thread.} =
     for i in 0..numNewConnected-1:
       clients.add(connected.recv)
     
-    var clientsToRemove = newSeq[int]()
-
-    for i in 0..high(clients):
+    for i in countDown(high(clients), 0):
       if clients[i].id != newMsg.sender and not sendData(clients[i].s, newMsg.text):
-        clientsToRemove.add(i)
-    
-    for c in clientsToRemove:
-      clients.del(c)
-
+        clients.del(i)
 
 var broadcasterThread: Thread[void]
 
