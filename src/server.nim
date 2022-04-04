@@ -5,26 +5,38 @@ socket.bindAddr(port)
 socket.listen()
 echo "Listening on ", port
 
-var messages: Channel[string]
-var connected: Channel[Socket]
+type ClientId = distinct int
+proc `==` *(a, b: ClientId): bool {.borrow.}
+proc `$` *(a: ClientId): string {.borrow.}
+
+type Client = object
+  id: ClientId
+  s: Socket
+
+type Message = object
+  sender: ClientId
+  text: string
+
+var messages: Channel[Message]
+var connected: Channel[Client]
 
 open messages
 open connected
 
-proc listenForMessages(s: Socket) {.thread.} =
+proc listenForMessages(c: Client) {.thread.} =
   while true:
     echo "Listening for messages..."
-    let msg = recvData(s)
+    let msg = recvData(c.s)
     if msg == "":
       echo "Client disconnected"
       break
     echo "Message received from a client: ", msg
-    messages.send msg
+    messages.send Message(sender: c.id, text: msg)
 
 proc broadcaster() {.thread.} =
-  var clients = newSeq[Socket]()
+  var clients = newSeq[Client]()
   while true:
-    let newMsg = messages.recv
+    let newMsg: Message = messages.recv
 
     let numNewConnected = connected.peek
     if numNewConnected == -1:
@@ -35,7 +47,7 @@ proc broadcaster() {.thread.} =
     var clientsToRemove = newSeq[int]()
 
     for i in 0..high(clients):
-      if not sendData(clients[i], newMsg):
+      if clients[i].id != newMsg.sender and not sendData(clients[i].s, newMsg.text):
         clientsToRemove.add(i)
     
     for c in clientsToRemove:
@@ -46,13 +58,16 @@ var broadcasterThread: Thread[void]
 
 createThread(broadcasterThread, broadcaster)
 
-var listenThreads = newSeq[Thread[Socket]]()
+var listenThreads = newSeq[Thread[Client]]()
+var nextClientId = 0
 while true:
-  var newClient: Socket
+  var newClient: Client
+  newClient.id = nextClientId.ClientId
   var address = ""
-  socket.acceptAddr(newClient, address)
+  socket.acceptAddr(newClient.s, address)
   echo "Client connected from: ", address
   connected.send newClient
 
-  listenThreads.add(Thread[Socket]())
+  listenThreads.add(Thread[Client]())
   createThread(listenThreads[high(listenThreads)], listenForMessages, newClient)
+  nextClientId += 1
